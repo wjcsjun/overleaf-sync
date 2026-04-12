@@ -1,6 +1,15 @@
 # Overleaf-Sync
 ### Easy Overleaf Two-Way Synchronization
 
+> **⚠️ 关于本 Fork**
+>
+> 原项目（[moritzgloeckl/overleaf-sync](https://github.com/moritzgloeckl/overleaf-sync)）已长期未维护，因 Overleaf 网站结构更新导致多处功能失效。本 Fork 在原项目基础上进行了以下修复：
+>
+> - **登录问题**：Overleaf 更新了项目列表页面的数据结构（`ol-prefetchedProjectsBlob` 替代旧 `ol-projects`），修复了无法获取项目列表的问题
+> - **WebSocket 连接**：重写了 Socket.IO 握手逻辑，修复了无法获取项目详情的问题
+> - **文件上传**：修复了文件上传接口的请求格式问题
+> - **PDF 编译与下载**：修复了原先只能下载第一个 PDF 文件的问题；新增对 `compiles.overleafusercontent.com` 备用域名的支持；新增流式下载，避免大文件内存溢出；补全了编译请求所需的 HTTP 请求头
+
 ![Made In Austria](https://img.shields.io/badge/Made%20in-Austria-%23ED2939.svg) ![PyPI - License](https://img.shields.io/pypi/l/overleaf-sync.svg) ![PyPI](https://img.shields.io/pypi/v/overleaf-sync.svg) ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/overleaf-sync.svg)
 
 This tool provides an easy way to synchronize Overleaf projects from and to your local computer. No paid account necessary.
