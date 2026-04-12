@@ -1,16 +1,16 @@
 # Overleaf-Sync
 ### Easy Overleaf Two-Way Synchronization
 
-> **⚠️ 关于本 Fork**
+> **⚠️ About this fork**
 >
-> 原项目（[moritzgloeckl/overleaf-sync](https://github.com/moritzgloeckl/overleaf-sync)）已长期未维护，因 Overleaf 网站结构更新导致多处功能失效。本 Fork 在原项目基础上进行了以下修复：
+> The original project ([moritzgloeckl/overleaf-sync](https://github.com/moritzgloeckl/overleaf-sync)) has not been maintained for a long time, and several features broke after changes to Overleaf's website and APIs. This fork fixes those issues, including:
 >
-> - **登录问题**：Overleaf 更新了项目列表页面的数据结构（`ol-prefetchedProjectsBlob` 替代旧 `ol-projects`），修复了无法获取项目列表的问题
-> - **WebSocket 连接**：重写了 Socket.IO 握手逻辑，修复了无法获取项目详情的问题
-> - **文件上传**：修复了文件上传接口的请求格式问题
-> - **PDF 编译与下载**：修复了原先只能下载第一个 PDF 文件的问题；新增对 `compiles.overleafusercontent.com` 备用域名的支持；新增流式下载，避免大文件内存溢出；补全了编译请求所需的 HTTP 请求头
+> - **Login and project listing**: updated project parsing to support `ol-prefetchedProjectsBlob` instead of the old `ol-projects` metadata
+> - **WebSocket connectivity**: reworked the Socket.IO handshake logic so project details can be retrieved again
+> - **File uploads**: fixed the upload request format used by Overleaf
+> - **PDF compile and download**: fixed the old behavior that could only download the first PDF file; added support for the `compiles.overleafusercontent.com` fallback domain; switched to streaming downloads for large files; and added the required HTTP headers for compile requests
 
-![Made In Austria](https://img.shields.io/badge/Made%20in-Austria-%23ED2939.svg) ![PyPI - License](https://img.shields.io/pypi/l/overleaf-sync.svg) ![PyPI](https://img.shields.io/pypi/v/overleaf-sync.svg) ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/overleaf-sync.svg)
+![PyPI - License](https://img.shields.io/pypi/l/overleaf-sync.svg) ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/overleaf-sync.svg)
 
 This tool provides an easy way to synchronize Overleaf projects from and to your local computer. No paid account necessary.
 
@@ -113,4 +113,3 @@ THE AUTHOR OF THIS SOFTWARE AND THIS SOFTWARE IS NOT ENDORSED BY, DIRECTLY AFFIL
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 THIS SOFTWARE WAS DESIGNED TO BE USED ONLY FOR RESEARCH PURPOSES. THIS SOFTWARE COMES WITH NO WARRANTIES OF ANY KIND WHATSOEVER. USE IT AT YOUR OWN RISK! IF THESE TERMS ARE NOT ACCEPTABLE, YOU AREN'T ALLOWED TO USE THE CODE.
-
