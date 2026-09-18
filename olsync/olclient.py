@@ -2,23 +2,64 @@
 import requests as reqs
 from bs4 import BeautifulSoup
 import json
-import uuid
 import socket
 import ssl
 import base64
 import os
 import struct
 import time
+from urllib.parse import quote
 
 LOGIN_URL = "https://www.overleaf.com/login"
 PROJECT_URL = "https://www.overleaf.com/project"
 DOWNLOAD_URL = "https://www.overleaf.com/project/{}/download/zip"
 UPLOAD_URL = "https://www.overleaf.com/project/{}/upload"
 FOLDER_URL = "https://www.overleaf.com/project/{}/folder"
-DELETE_URL = "https://www.overleaf.com/project/{}/doc/{}"
+DOC_DELETE_URL = "https://www.overleaf.com/project/{}/doc/{}"
+FILE_DELETE_URL = "https://www.overleaf.com/project/{}/file/{}"
 COMPILE_URL = "https://www.overleaf.com/project/{}/compile?enable_pdf_caching=true"
 BASE_URL = "https://www.overleaf.com"
 PATH_SEP = "/"
+# rootDoc_id must be an explicit JSON null: "" is rejected (400 Invalid Mongo
+# ObjectId) and omitting the key yields status "timedout" (see task research).
+COMPILE_BODY = {"check": "silent", "draft": False, "incrementalCompilesEnabled": True,
+                "rootDoc_id": None, "stopOnFirstError": False}
+
+
+def _select_pdf_output(output_files):
+    """Pick the PDF entry from a compile response's `outputFiles`.
+
+    Prefers the main `output.pdf`; otherwise the last PDF listed; None if there is no PDF.
+    """
+    pdfs = [f for f in output_files if f.get("type") == "pdf"]
+    for entry in pdfs:
+        if entry.get("url", "").endswith("output.pdf"):
+            return entry
+    return pdfs[-1] if pdfs else None
+
+
+def _pdf_candidate_urls(compile_result, pdf_entry):
+    """Build the URLs to try for an output file, in order.
+
+    `pdfDownloadDomain` (from the compile response) first, then BASE_URL, without
+    duplicates. `clsiserverid` is appended whenever the compile response carries
+    `clsiServerId`; without it the CLSI node holding the build is not reached
+    and every domain answers 404.
+    """
+    domains = []
+    for domain in (compile_result.get("pdfDownloadDomain"), BASE_URL):
+        if domain:
+            domain = domain.rstrip("/")
+            if domain not in domains:
+                domains.append(domain)
+    clsi_server_id = compile_result.get("clsiServerId")
+    urls = []
+    for domain in domains:
+        url = domain + pdf_entry["url"]
+        if clsi_server_id:
+            url += ("&" if "?" in url else "?") + "clsiserverid=" + quote(clsi_server_id)
+        urls.append(url)
+    return urls
 
 
 def _ws_send(sock, text):
@@ -85,6 +126,28 @@ def _open_ws(host, path, cookies_str, timeout=16):
     if "101" not in status_line:
         raise ConnectionError(f"WebSocket handshake failed: {status_line}")
     return tls_sock
+
+
+def find_entry(project_infos, file_name):
+    """Locate a remote path in the joinProject tree.
+
+    Returns ("doc", id) for entries in `docs`, ("file", id) for entries in
+    `fileRefs`, or None when any folder segment or the leaf is missing.
+    Folder and leaf names are matched exactly (case-sensitive); the leaf is
+    only looked up in the final folder.
+    """
+    folder = project_infos["rootFolder"][0]
+    segments = file_name.split(PATH_SEP)
+    for segment in segments[:-1]:
+        folder = next((f for f in folder.get("folders", []) if f.get("name") == segment), None)
+        if folder is None:
+            return None
+    leaf = segments[-1]
+    for kind, key in (("doc", "docs"), ("file", "fileRefs")):
+        entry = next((e for e in folder.get(key, []) if e.get("name") == leaf), None)
+        if entry is not None:
+            return kind, entry["_id"]
+    return None
 
 
 class OverleafClient(object):
@@ -200,10 +263,7 @@ class OverleafClient(object):
                       headers=headers, json=params)
         if r.ok:
             return json.loads(r.content)
-        elif r.status_code == str(400):
-            return
-        else:
-            raise reqs.HTTPError()
+        raise reqs.HTTPError(f"Creating folder '{folder_name}' failed: HTTP {r.status_code}: {r.text[:200]}")
 
     def get_project_infos(self, project_id):
         project_infos = None
@@ -276,75 +336,55 @@ class OverleafClient(object):
     
 
     def delete_file(self, project_id, project_infos, file_name):
-        file = None
-        if PATH_SEP in file_name:
-            local_folders = file_name.split(PATH_SEP)[:-1]
-            current_overleaf_folder = project_infos['rootFolder'][0]['folders']
-            for local_folder in local_folders:
-                for remote_folder in current_overleaf_folder:
-                    if local_folder.lower() == remote_folder['name'].lower():
-                        file = next(
-                            (v for v in remote_folder['docs']
-                             if v['name'] == file_name.split(PATH_SEP)[-1]), None)
-                        current_overleaf_folder = remote_folder['folders']
-                        break
-        else:
-            file = next(
-                (v for v in project_infos['rootFolder'][0]['docs']
-                 if v['name'] == file_name), None)
-        if file is None:
-            return False
+        """Delete a remote doc or fileRef by its remote path.
+
+        Docs go through /doc/<id>, fileRefs through /file/<id>. Returns True on
+        HTTP 204; raises FileNotFoundError when the path is not in the tree and
+        requests.HTTPError for any other status.
+        """
+        entry = find_entry(project_infos, file_name)
+        if entry is None:
+            raise FileNotFoundError(f"'{file_name}' was not found in the remote project tree")
+        kind, entity_id = entry
+        url = DOC_DELETE_URL if kind == "doc" else FILE_DELETE_URL
         headers = {"X-Csrf-Token": self._csrf}
-        r = reqs.delete(DELETE_URL.format(project_id, file['_id']),
+        r = reqs.delete(url.format(project_id, entity_id),
                         cookies=self._cookie, headers=headers, json={})
-        return r.status_code == str(204)
+        if r.status_code != 204:
+            raise reqs.HTTPError(f"Deleting '{file_name}' failed: HTTP {r.status_code}: {r.text[:200]}")
+        return True
 
     def download_pdf(self, project_id):
+        """Compile the project and return (file_name, pdf_bytes).
+
+        Raises requests.HTTPError when the compile request is rejected, the
+        compile status is not "success", no PDF was produced, or no candidate
+        URL served a PDF.
+        """
         headers = {
             "X-Csrf-Token": self._csrf,
             "Accept": "application/json",
             "X-Requested-With": "XMLHttpRequest",
         }
-        body = {
-            "check": "silent",
-            "draft": False,
-            "incrementalCompilesEnabled": True,
-            "rootDoc_id": "",
-            "stopOnFirstError": False,
-        }
         r = reqs.post(COMPILE_URL.format(project_id), cookies=self._cookie,
-                      headers=headers, json=body)
+                      headers=headers, json=COMPILE_BODY)
         if not r.ok:
-            raise reqs.HTTPError()
+            raise reqs.HTTPError(f"Compile request failed: HTTP {r.status_code}: {r.text[:200]}")
         compile_result = r.json()
-        if compile_result.get("status") != "success":
-            raise reqs.HTTPError()
+        status = compile_result.get("status")
+        if status != "success":
+            raise reqs.HTTPError(f"Compile finished with status '{status}'")
 
-        output_files = compile_result.get("outputFiles", [])
-        # 优先取 output.pdf（主编译产物）
-        pdf_file = next(
-            (f for f in output_files if f["type"] == "pdf" and f["url"].endswith("output.pdf")),
-            None,
-        )
-        # 退而求其次取列表中最后一个 PDF
+        pdf_file = _select_pdf_output(compile_result.get("outputFiles", []))
         if pdf_file is None:
-            pdf_files = [f for f in output_files if f["type"] == "pdf"]
-            pdf_file = pdf_files[-1] if pdf_files else None
+            raise reqs.HTTPError("Compile succeeded but produced no PDF output")
 
-        if pdf_file is None:
-            return None, None
-
-        pdf_url = BASE_URL + pdf_file["url"]
-        r = reqs.get(pdf_url, cookies=self._cookie, headers=headers, stream=True)
-
-        # Overleaf 有时将编译产物托管在 compiles.overleafusercontent.com
-        if not r.ok or r.headers.get("content-type", "") != "application/pdf":
-            pdf_url = "https://compiles.overleafusercontent.com" + pdf_file["url"]
+        attempts = []
+        for pdf_url in _pdf_candidate_urls(compile_result, pdf_file):
             r = reqs.get(pdf_url, cookies=self._cookie, headers=headers, stream=True)
-
-        if not r.ok:
-            return None, None
-
-        content = b"".join(chunk for chunk in r.iter_content(chunk_size=8192) if chunk)
-        file_name = pdf_file.get("path", "output.pdf")
-        return file_name, content
+            content_type = r.headers.get("content-type", "")
+            if r.ok and content_type.startswith("application/pdf"):
+                content = b"".join(chunk for chunk in r.iter_content(chunk_size=8192) if chunk)
+                return pdf_file.get("path", "output.pdf"), content
+            attempts.append(f"{pdf_url} -> HTTP {r.status_code} ({content_type})")
+        raise reqs.HTTPError("Could not fetch the PDF; tried: " + "; ".join(attempts))

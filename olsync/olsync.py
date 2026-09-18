@@ -320,7 +320,7 @@ def sync_func(files_from, deleted_files, create_file_at_to, delete_file_at_to, c
         except:
             if verbose:
                 print(traceback.format_exc())
-            raise click.ClickException("\n[ERROR] An error occurred while creating new file(s) on [%s]" % to_name)
+            raise click.ClickException("\n[ERROR] An error occurred while deleting file(s) on [%s]" % to_name)
 
     click.echo(
         "\n[SYNC] Following file(s) are up to date")

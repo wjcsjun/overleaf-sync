@@ -114,5 +114,7 @@ venv.bak/
 # dev testing
 setup.py
 test*
+!tests/
+!tests/*.py
 .olauth
 .olignore
